@@ -14,3 +14,14 @@ services:
       - ./api:/app
     ports:
       - "8000:8000"
+
+  web:
+    build:
+      context: ./web
+      dockerfile: ./Dockerfile
+    container_name: practice-record-api-web
+    image: practice-record-api-web
+    ports:
+      - "80:80"
+    depends_on:
+      - api
