@@ -36,6 +36,7 @@ class Record(Base):
     startMinute = Column(String)
     endTime = Column(String)
     endMinute = Column(String)
+    userId = Column(String)
     practiceDetails = relationship("PracticeDetail", back_populates="record")
 
 class PracticeDetail(Base):

@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session  # AsyncSessionの代わりにSessionをインポート
-from models import Base, SessionLocal, engine, Record, PracticeDetail, Tag
+from .models import Base, SessionLocal, engine, Record, PracticeDetail, Tag
 from pydantic import BaseModel, Field
 from typing import List, Optional
 import datetime
@@ -44,6 +44,7 @@ class CreateRecordModel(BaseModel):
     startMinute: str
     endTime: str
     endMinute: str
+    userId: str
     practiceDetails: List[PracticeDetailModel]
 
 class RecordModel(BaseModel):
@@ -54,6 +55,7 @@ class RecordModel(BaseModel):
     startMinute: str
     endTime: str
     endMinute: str
+    userId: str
     practiceDetails: List[PracticeDetailModel]
 
 @app.post("/records/")
@@ -65,6 +67,7 @@ def create_record(record_data: CreateRecordModel, db: Session = Depends(get_db))
         startMinute=record_data.startMinute,
         endTime=record_data.endTime,
         endMinute=record_data.endMinute,
+        userId=record_data.userId,
     )
     db.add(new_record)
     db.flush()  # RecordインスタンスをフラッシュしてIDを取得
@@ -94,7 +97,7 @@ def create_record(record_data: CreateRecordModel, db: Session = Depends(get_db))
     return {"message": "Record created successfully"}
 
 @app.get("/records/{year}/{month}", response_model=List[RecordModel])
-def get_records_by_month(year: int, month: int, db: Session = Depends(get_db)):
+def get_records_by_month(year: int, month: int, userId: str, db: Session = Depends(get_db)):
     start_date = datetime.date(year, month, 1)
     # 月の最終日を取得するために、翌月の1日から1日引く
     if month == 12:
@@ -102,7 +105,7 @@ def get_records_by_month(year: int, month: int, db: Session = Depends(get_db)):
     else:
         end_date = datetime.date(year, month + 1, 1) - datetime.timedelta(days=1)
 
-    records = db.query(Record).filter(Record.date >= start_date, Record.date <= end_date).all()
+    records = db.query(Record).filter(Record.date >= start_date, Record.date <= end_date, Record.userId == userId).all()
 
     result = []
     for record in records:
@@ -118,14 +121,15 @@ def get_records_by_month(year: int, month: int, db: Session = Depends(get_db)):
             startMinute=record.startMinute,
             endTime=record.endTime,
             endMinute=record.endMinute,
+            userId=record.userId,  # userIdをレスポンスモデルに含める
             practiceDetails=practice_details
         ))
 
     return result
 
 @app.get("/records/{record_id}", response_model=RecordModel)
-def get_record_by_id(record_id: int, db: Session = Depends(get_db)):
-    record = db.query(Record).filter(Record.id == record_id).first()
+def get_record_by_id(record_id: int, userId: str, db: Session = Depends(get_db)):
+    record = db.query(Record).filter(Record.id == record_id, Record.userId == userId).first()
     if record is None:
         raise HTTPException(status_code=404, detail="Record not found")
 
@@ -142,13 +146,14 @@ def get_record_by_id(record_id: int, db: Session = Depends(get_db)):
         startMinute=record.startMinute,
         endTime=record.endTime,
         endMinute=record.endMinute,
+        userId=record.userId,  # userIdをレスポンスモデルに含める
         practiceDetails=practice_details
     )
 
 @app.delete("/records/{record_id}")
-def delete_record_by_id(record_id: int, db: Session = Depends(get_db)):
-    # 指定されたIDのRecordを検索
-    record = db.query(Record).filter(Record.id == record_id).first()
+def delete_record_by_id(record_id: int, userId: str, db: Session = Depends(get_db)):
+    # 指定されたIDのRecordを検索し、かつuserIdが一致するものを確認
+    record = db.query(Record).filter(Record.id == record_id, Record.userId == userId).first()
     if record is None:
         raise HTTPException(status_code=404, detail="Record not found")
 
@@ -166,8 +171,8 @@ def delete_record_by_id(record_id: int, db: Session = Depends(get_db)):
 
 @app.put("/records/{record_id}")
 def update_record_by_id(record_id: int, record_data: CreateRecordModel, db: Session = Depends(get_db)):
-    # 指定されたIDのRecordを検索
-    record = db.query(Record).filter(Record.id == record_id).first()
+    # 指定されたIDのRecordを検索し、かつuserIdが一致するものを確認
+    record = db.query(Record).filter(Record.id == record_id, Record.userId == record_data.userId).first()
     if record is None:
         raise HTTPException(status_code=404, detail="Record not found")
 
@@ -178,6 +183,7 @@ def update_record_by_id(record_id: int, record_data: CreateRecordModel, db: Sess
     record.startMinute = record_data.startMinute
     record.endTime = record_data.endTime
     record.endMinute = record_data.endMinute
+    # userIdの更新は不要なので、ここでは触らない
 
     # 既存のPracticeDetailを削除
     for detail in record.practiceDetails:
