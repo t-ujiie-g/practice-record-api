@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session  # AsyncSessionの代わりにSessionをインポート
-from .models import Base, SessionLocal, engine, Record, PracticeDetail, Tag
+from models import Base, SessionLocal, engine, Record, PracticeDetail, Tag
 from pydantic import BaseModel, Field
 from typing import List, Optional
 import datetime
