@@ -1,6 +1,7 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session  # AsyncSessionの代わりにSessionをインポート
+from sqlalchemy import func, or_
 from models import Base, SessionLocal, engine, Record, PracticeDetail, Tag
 from pydantic import BaseModel, Field
 from typing import List, Optional
@@ -208,3 +209,37 @@ def update_record_by_id(record_id: int, record_data: CreateRecordModel, db: Sess
     db.commit()  # 最終的な変更をコミット
 
     return {"message": "Record updated successfully"}
+
+@app.get("/analysis")
+def get_analysis(start_date: Optional[datetime.date] = None, end_date: Optional[datetime.date] = None, content: Optional[str] = Query(None), tag_names: List[str] = Query(None), db: Session = Depends(get_db)):
+    # 基本となるクエリを構築
+    query = db.query(PracticeDetail.content, Tag.name, func.count(Tag.name).label('count'))\
+              .join(PracticeDetail.practiceTags)\
+              .join(Record, Record.id == PracticeDetail.recordId)\
+              .group_by(PracticeDetail.content, Tag.name)
+
+    # オプショナルなフィルタリング条件
+    print(tag_names)
+    if start_date and end_date:
+        query = query.filter(Record.date >= start_date, Record.date <= end_date)
+    if content:
+        query = query.filter(PracticeDetail.content == content)
+    if tag_names:
+        # OR条件でタグ名をフィルタリング
+        query = query.filter(or_(*[Tag.name == tag_name for tag_name in tag_names]))
+    print(query)
+
+    # 結果を取得
+    raw_result = query.all()
+
+    # 結果を整理
+    organized_result = {}
+    for content, tag, count in raw_result:
+        if content not in organized_result:
+            organized_result[content] = []
+        organized_result[content].append({tag: count})
+
+    # 最終的な形式に変換
+    final_result = [{content: tags} for content, tags in organized_result.items()]
+
+    return final_result
