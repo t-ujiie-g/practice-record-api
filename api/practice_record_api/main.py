@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session  # AsyncSessionの代わりにSessionをインポート
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, and_
 from models import Base, SessionLocal, engine, Record, PracticeDetail, Tag
 from pydantic import BaseModel, Field
 from typing import List, Optional
@@ -211,23 +211,33 @@ def update_record_by_id(record_id: int, record_data: CreateRecordModel, db: Sess
     return {"message": "Record updated successfully"}
 
 @app.get("/analysis")
-def get_analysis(start_date: Optional[datetime.date] = None, end_date: Optional[datetime.date] = None, content: Optional[str] = Query(None), tag_names: List[str] = Query(None), db: Session = Depends(get_db)):
+def get_analysis(start_date: Optional[datetime.date] = None, end_date: Optional[datetime.date] = None, contents: List[str] = Query(None), tag_names: List[str] = Query(None), description: Optional[str] = None, db: Session = Depends(get_db)):
     # 基本となるクエリを構築
     query = db.query(PracticeDetail.content, Tag.name, func.count(Tag.name).label('count'))\
               .join(PracticeDetail.practiceTags)\
               .join(Record, Record.id == PracticeDetail.recordId)\
               .group_by(PracticeDetail.content, Tag.name)
 
-    # オプショナルなフィルタリング条件
-    print(tag_names)
-    if start_date and end_date:
-        query = query.filter(Record.date >= start_date, Record.date <= end_date)
-    if content:
-        query = query.filter(PracticeDetail.content == content)
+    # 期間フィルタリング
+    date_filters = []
+    if start_date:
+        date_filters.append(Record.date >= start_date)
+    if end_date:
+        date_filters.append(Record.date <= end_date)
+    if date_filters:
+        query = query.filter(and_(*date_filters))
+
+    # contentフィルタリング
+    if contents:
+        query = query.filter(or_(*[PracticeDetail.content == content for content in contents]))
+
+    # tag_namesフィルタリング
     if tag_names:
-        # OR条件でタグ名をフィルタリング
         query = query.filter(or_(*[Tag.name == tag_name for tag_name in tag_names]))
-    print(query)
+
+    # descriptionフィルタリング（部分一致）
+    if description:
+        query = query.filter(Record.description.like(f"%{description}%"))
 
     # 結果を取得
     raw_result = query.all()
