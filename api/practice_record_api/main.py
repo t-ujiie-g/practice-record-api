@@ -1,7 +1,8 @@
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session  # AsyncSessionの代わりにSessionをインポート
-from sqlalchemy import func, or_, and_
+from sqlalchemy.orm import Session, aliased  # AsyncSessionの代わりにSessionをインポート
+from sqlalchemy import func, or_, and_, Integer
+from sqlalchemy.sql import exists
 from models import Base, SessionLocal, engine, Record, PracticeDetail, Tag
 from pydantic import BaseModel, Field
 from typing import List, Optional
@@ -210,7 +211,7 @@ def update_record_by_id(record_id: int, record_data: CreateRecordModel, db: Sess
 
     return {"message": "Record updated successfully"}
 
-@app.get("/analysis")
+@app.get("/analysis_tag")
 def get_analysis(start_date: Optional[datetime.date] = None, end_date: Optional[datetime.date] = None, contents: List[str] = Query(None), tag_names: List[str] = Query(None), description: Optional[str] = None, db: Session = Depends(get_db)):
     # 基本となるクエリを構築
     query = db.query(PracticeDetail.content, Tag.name, func.count(Tag.name).label('count'))\
@@ -251,5 +252,70 @@ def get_analysis(start_date: Optional[datetime.date] = None, end_date: Optional[
 
     # 最終的な形式に変換
     final_result = [{content: tags} for content, tags in organized_result.items()]
+
+    return final_result
+
+
+@app.get("/analysis_detail")
+def get_detailed_analysis(start_date: Optional[datetime.date] = None, end_date: Optional[datetime.date] = None, contents: List[str] = Query(None), tag_names: List[str] = Query(None), description: Optional[str] = None, db: Session = Depends(get_db)):
+    # タグ名に基づくサブクエリを構築
+    if tag_names:
+        tag_subquery = db.query(PracticeDetail.id)\
+            .join(PracticeDetail.practiceTags)\
+            .group_by(PracticeDetail.id)\
+            .having(and_(*[func.sum((Tag.name == tag_name).cast(Integer)) >= 1 for tag_name in tag_names]))\
+            .subquery()
+
+    # タグ名を集約するためのサブクエリ
+    tags_subquery = db.query(
+        PracticeDetail.id.label("pd_id"),
+        func.array_agg(Tag.name).label("tags")
+    ).join(
+        PracticeDetail.practiceTags
+    ).group_by(
+        PracticeDetail.id
+    ).subquery()
+
+    # 基本となるクエリを構築
+    query = db.query(
+        PracticeDetail.id, 
+        PracticeDetail.content, 
+        Record.description, 
+        Record.date,
+        tags_subquery.c.tags
+    ).join(
+        Record, Record.id == PracticeDetail.recordId
+    ).outerjoin(
+        tags_subquery, tags_subquery.c.pd_id == PracticeDetail.id
+    )
+
+    if tag_names:
+        query = query.join(tag_subquery, PracticeDetail.id == tag_subquery.c.id)
+
+    # 期間フィルタリング
+    if start_date:
+        query = query.filter(Record.date >= start_date)
+    if end_date:
+        query = query.filter(Record.date <= end_date)
+
+    # contentフィルタリング
+    if contents:
+        query = query.filter(or_(*[PracticeDetail.content == content for content in contents]))
+
+    # descriptionフィルタリング（部分一致）
+    if description:
+        query = query.filter(Record.description.like(f"%{description}%"))
+
+    # 結果を取得
+    result = query.all()
+
+    # 結果を整理
+    final_result = [{
+        "id": id_,
+        "content": content, 
+        "description": record_description, 
+        "date": record_date.strftime("%Y-%m-%d"), 
+        "tags": tags
+    } for id_, content, record_description, record_date, tags in result]
 
     return final_result
