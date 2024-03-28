@@ -299,7 +299,7 @@ def get_detailed_analysis(
         Record.description, 
         Record.date,
         tags_subquery.c.tags
-    ).join(
+    ).distinct(PracticeDetail.id).join(
         Record, Record.id == PracticeDetail.recordId
     ).outerjoin(
         tags_subquery, tags_subquery.c.pd_id == PracticeDetail.id
