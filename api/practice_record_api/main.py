@@ -257,14 +257,30 @@ def get_analysis(start_date: Optional[datetime.date] = None, end_date: Optional[
 
 
 @app.get("/analysis_detail")
-def get_detailed_analysis(start_date: Optional[datetime.date] = None, end_date: Optional[datetime.date] = None, contents: List[str] = Query(None), tag_names: List[str] = Query(None), description: Optional[str] = None, db: Session = Depends(get_db)):
+def get_detailed_analysis(
+    start_date: Optional[datetime.date] = None, 
+    end_date: Optional[datetime.date] = None, 
+    contents: List[str] = Query(None), 
+    tag_names: List[str] = Query(None), 
+    description: Optional[str] = None, 
+    condition: Optional[str] = "and",
+    db: Session = Depends(get_db)
+):
     # タグ名に基づくサブクエリを構築
     if tag_names:
-        tag_subquery = db.query(PracticeDetail.id)\
-            .join(PracticeDetail.practiceTags)\
-            .group_by(PracticeDetail.id)\
-            .having(and_(*[func.sum((Tag.name == tag_name).cast(Integer)) >= 1 for tag_name in tag_names]))\
-            .subquery()
+        if condition == "or":
+            tag_conditions = [Tag.name == tag_name for tag_name in tag_names]
+            tag_subquery = db.query(PracticeDetail.id)\
+                .join(PracticeDetail.practiceTags)\
+                .filter(or_(*tag_conditions))\
+                .subquery()
+        else:  # デフォルトは "and" 条件
+            tag_conditions = [func.sum((Tag.name == tag_name).cast(Integer)) >= 1 for tag_name in tag_names]
+            tag_subquery = db.query(PracticeDetail.id)\
+                .join(PracticeDetail.practiceTags)\
+                .group_by(PracticeDetail.id)\
+                .having(and_(*tag_conditions))\
+                .subquery()
 
     # タグ名を集約するためのサブクエリ
     tags_subquery = db.query(
